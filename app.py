@@ -1,6 +1,5 @@
 import pandas as pd
 import streamlit as st
-from fpdf import FPDF  # Import FPDF for PDF generation
 import spacy
 from spacy.matcher import PhraseMatcher
 
