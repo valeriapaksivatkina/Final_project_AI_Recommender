@@ -76,39 +76,36 @@ def recommend_tools(user_input, data):
 
 
 # Función para generar PDF desde recomendaciones
-def generate_pdf(matched_tools, user_input):
-    # Inicializar el objeto PDF
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", size=12)
-
-    # Título principal
-    pdf.cell(200, 10, txt=f"Recommendations for AI tools based on your interests", ln=True, align='C')
-
-    # Iterar sobre cada herramienta recomendada
-    for i, tool in enumerate(matched_tools, start=1):
-        # Agregar número y nombre de la herramienta
-        pdf.set_font("Arial", style='B', size=12)
-        pdf.cell(200, 10, txt=f"{i}. {tool['name']}", ln=True)
-
-        # Detalles de la herramienta
-        pdf.set_font("Arial", size=9)
-        pdf.cell(200, 10, txt=f"Description: {tool['description']}", ln=True)
-        pdf.cell(200, 10, txt=f"Use Case: {tool['use_case']}", ln=True)
-        pdf.cell(200, 10, txt=f"Link: {tool['link']}", ln=True)
-        pdf.cell(200, 10, txt=f"Reviews: {tool['reviews']}", ln=True)
-        pdf.cell(200, 10, txt=f"Type: {tool['free_paid']}", ln=True)
-        pdf.cell(200, 10, txt=f"Charges: {tool['charges']}", ln=True)
-        
-        # Espacio entre herramientas
-        pdf.ln()
-
-    # Nombre del archivo PDF de salida
+def generate_pdf_reportlab(matched_tools, user_input):
     pdf_output = f"recommendations_{user_input.replace(' ', '_')}.pdf"
+    c = canvas.Canvas(pdf_output, pagesize=letter)
     
-    # Generar el PDF y guardar
-    pdf.output(name=pdf_output)
-
+    # Título principal
+    c.setFont("Helvetica-Bold", 24)
+    c.drawCentredString(300, 750, "Recommendations for AI tools based on your interests")
+    
+    # Contenido de las herramientas recomendadas
+    c.setFont("Helvetica", 12)
+    y = 700
+    for i, tool in enumerate(matched_tools, start=1):
+        y -= 20
+        c.drawString(100, y, f"{i}. {tool['name']}")
+        y -= 15
+        c.drawString(100, y, f"Description: {tool['description']}")
+        y -= 15
+        c.drawString(100, y, f"Use Case: {tool['use_case']}")
+        y -= 15
+        c.drawString(100, y, f"Link: {tool['link']}")
+        y -= 15
+        c.drawString(100, y, f"Reviews: {tool['reviews']}")
+        y -= 15
+        c.drawString(100, y, f"Type: {tool['free_paid']}")
+        y -= 15
+        c.drawString(100, y, f"Charges: {tool['charges']}")
+        y -= 15
+        y -= 10  # Espacio entre herramientas
+        
+    c.save()
     return pdf_output
 # Load data
 data = load_data()
@@ -325,7 +322,7 @@ if selected_category == 'all':
                 """, unsafe_allow_html=True)
                     
             # Download recommendations as PDF
-            pdf_file = generate_pdf(matched_tools, user_input)
+            pdf_file = generate_pdf_reportlab(matched_tools, user_input)
             st.success(f"PDF generated successfully!")
             st.markdown(f"Download [recommendations PDF]({pdf_file})")
 
