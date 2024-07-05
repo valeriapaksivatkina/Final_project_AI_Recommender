@@ -1,93 +1,115 @@
 import pandas as pd
 import streamlit as st
-import openai
 from fpdf import FPDF  # Import FPDF for PDF generation
+import spacy
+from spacy.matcher import PhraseMatcher
 
 @st.cache_data()
 def load_data():
-    df = pd.read_csv('./df_sampled_category_usability.csv').sample(700)
+    df = pd.read_csv('./df_original_clean_explode_useablefor.csv')
     return df
 
-openai.api_key = ***
+# Cargar el modelo de spaCy y definir el matcher
+nlp = spacy.load("en_core_web_sm")
+# Función para extraer keywords del texto de entrada del usuario
+def extract_keywords(text):
+    doc = nlp(text)
+    keywords = []
 
+    # Variable para almacenar palabras compuestas por sustantivos consecutivos
+    current_keyword = []
+
+    # Iterar sobre los tokens del documento
+    for token in doc:
+        if token.pos_ == 'NOUN' and not token.is_stop and token.is_alpha:
+            current_keyword.append(token.lemma_.lower())
+        else:
+            if current_keyword:
+                keywords.append(' '.join(current_keyword))
+                current_keyword = []
+
+    # Añadir la última keyword si no se ha añadido todavía
+    if current_keyword:
+        keywords.append(' '.join(current_keyword))
+
+    return keywords
+
+# Function to recommend tools based on keywords and data
 def recommend_tools(user_input, data):
-    keywords = user_input.lower().split()  # Divide la entrada del usuario en palabras clave y las convierte a minúsculas
-    matched_tools = []  # Lista vacía donde se almacenarán las herramientas coincidentes
-    
-    # Itera sobre cada fila (herramienta) en el conjunto de datos proporcionado
+    # Handling empty input
+    if not user_input.strip():
+        return "You haven't entered anything."
+
+    user_keywords = extract_keywords(user_input)
+    matched_tools = []
+    added_tool_names = set()
+
+    # Iterating through each row in the dataset
     for idx, row in data.iterrows():
-        useable_for = row['Useable For'].lower()  # Obtiene el caso de uso de la herramienta en minúsculas
-        description = row['Description'].lower()  # Obtiene la descripción de la herramienta en minúsculas
-        
-        # Verifica primero si alguna palabra clave está presente en el caso de uso de la herramienta
-        if any(keyword in useable_for for keyword in keywords):
-            # Si hay coincidencias en el caso de uso, agrega la herramienta a la lista de herramientas coincidentes
-            matched_tools.append({
-                'name': row['AI Tool Name'],         # Nombre de la herramienta de IA
-                'description': row['Description'],   # Descripción de la herramienta
-                'use_case': row['Useable For'],      # Caso de uso de la herramienta
-                'link': row['Tool Link'],            # Enlace de la herramienta
-                'free_paid': row['Free/Paid'],       # Gratis o de pago
-                'charges': row['Charges'],           # Costos asociados
-                'reviews': row['Review'] if 'Review' in data.columns else None  # Reseñas de la herramienta (si están disponibles)
-            })
-        elif any(keyword in description for keyword in keywords):
-            # Si no hay coincidencias en el caso de uso pero sí en la descripción, agrega la herramienta igualmente
-            matched_tools.append({
-                'name': row['AI Tool Name'],         # Nombre de la herramienta de IA
-                'description': row['Description'],   # Descripción de la herramienta
-                'use_case': row['Useable For'],      # Caso de uso de la herramienta
-                'link': row['Tool Link'],            # Enlace de la herramienta
-                'free_paid': row['Free/Paid'],       # Gratis o de pago
-                'charges': row['Charges'],           # Costos asociados
-                'reviews': row['Review'] if 'Review' in data.columns else None  # Reseñas de la herramienta (si están disponibles)
-            })
-    
-    # Si no se encontraron herramientas coincidentes, devuelve un mensaje indicando que no se encontraron herramientas
+        description = row['Description'].lower()
+        useable_for = row['Useable For'].lower()
+
+        # Checking if user keywords are present in description or useable_for
+        if all(keyword in description or keyword in useable_for for keyword in user_keywords):
+            tool_name = row['AI Tool Name']
+
+            # Checking if the tool has already been added to recommendations
+            if tool_name not in added_tool_names:
+                matched_tools.append({
+                    'name': tool_name,
+                    'description': description,
+                    'use_case': useable_for,
+                    'link': row.get('Tool Link', ''),
+                    'free_paid': row.get('Free/Paid', ''),
+                    'charges': row.get('Charges', ''),
+                    'reviews': row.get('Review', None)
+                })
+
+                added_tool_names.add(tool_name)
+
+    # Handling no matched tools case
     if not matched_tools:
-        return "We couldn't understand your question or no tools matching your interests were found. Please try a different query."
-    
-    prompt = f"Recommend AI tools for a user interested in {user_input}. Based on the tools found in the data:"
-    max_tools_in_prompt = 5  # Limita el número de herramientas en el prompt
-    for tool in matched_tools[:max_tools_in_prompt]:
-        prompt += f"\n- {tool['name']} [More info]({tool['link']})"
+        return "No tools available for you. Please try simplifying your query."
 
-    # Llama a OpenAI para completar el texto generado basado en el prompt
-    response = openai.Completion.create(
-        model="gpt-3.5-turbo-instruct",   # Modelo de OpenAI a utilizar
-        prompt=prompt,                    # Prompt inicial
-        max_tokens=150,                   # Máximo de tokens para la respuesta generada
-        n=1,                              # Número de respuestas a generar
-        stop=None,                        # Condición de parada opcional
-        temperature=0.7                   # Temperatura para el muestreo de tokens
-    )
-
-    # Extrae y formatea la respuesta generada por OpenAI
-    generated_text = response['choices'][0]['text'].strip()
-    
-    
-    # Devuelve las herramientas coincidentes y el texto generado
-    return matched_tools, generated_text
+    return matched_tools
 
 
 
-# Function to generate PDF from recommendations
+# Función para generar PDF desde recomendaciones
 def generate_pdf(matched_tools, user_input):
+    # Inicializar el objeto PDF
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", size=12)
 
-    pdf.cell(200, 10, txt=f"Recommendations for AI tools based on your interest in '{user_input}':", ln=True, align='C')
+    # Título principal
+    pdf.cell(200, 10, txt=f"Recommendations for AI tools based on your interests", ln=True, align='C')
 
+    # Iterar sobre cada herramienta recomendada
     for i, tool in enumerate(matched_tools, start=1):
-        pdf.cell(200, 10, txt=f"\n{i}. {tool['name']}:", ln=True)
-        pdf.multi_cell(0, 10, txt=f"- Description: {tool['description']}\n  Use Case: {tool['use_case']}\n  Link: {tool['link']}\n  Reviews: {tool['reviews']}\n  Type: {tool['free_paid']}\n  Charges: {tool['charges']}\n", align='L')
+        # Agregar número y nombre de la herramienta
+        pdf.set_font("Arial", style='B', size=12)
+        pdf.cell(200, 10, txt=f"{i}. {tool['name']}", ln=True)
 
+        # Detalles de la herramienta
+        pdf.set_font("Arial", size=9)
+        pdf.cell(200, 10, txt=f"Description: {tool['description']}", ln=True)
+        pdf.cell(200, 10, txt=f"Use Case: {tool['use_case']}", ln=True)
+        pdf.cell(200, 10, txt=f"Link: {tool['link']}", ln=True)
+        pdf.cell(200, 10, txt=f"Reviews: {tool['reviews']}", ln=True)
+        pdf.cell(200, 10, txt=f"Type: {tool['free_paid']}", ln=True)
+        pdf.cell(200, 10, txt=f"Charges: {tool['charges']}", ln=True)
+        
+        # Espacio entre herramientas
+        pdf.ln()
+
+    # Nombre del archivo PDF de salida
     pdf_output = f"recommendations_{user_input.replace(' ', '_')}.pdf"
+    
+    # Generar el PDF y guardar
     pdf.output(name=pdf_output)
 
     return pdf_output
-
 # Load data
 data = load_data()
 
@@ -282,7 +304,7 @@ if selected_category == 'all':
         if isinstance(results, str):
             st.write(results)
         else:
-            matched_tools, recommendations = results
+            matched_tools = results
 
             st.subheader("AI Tool Recommendations:")
 
@@ -295,14 +317,13 @@ if selected_category == 'all':
                         <div style="border: 1px solid #e0e0e0; border-radius: 10px; padding: 10px; margin: 10px 0;">
                             <h3>{tool['name']}</h3>
                             <p><strong>Description:</strong> {tool['description']}</p>
-                            <p><strong>Use Case:</strong> {tool['use_case']}</p>
                             <p><strong>Link:</strong> <a href="{tool['link']}" target="_blank">{tool['link']}</a></p>
                             <p><strong>Reviews:</strong> {tool['reviews']}</p>
                             <p><strong>Type:</strong> {tool['free_paid']}</p>
                             <p><strong>Charges:</strong> {tool['charges']}</p>
                         </div>
                 """, unsafe_allow_html=True)
-
+                    
             # Download recommendations as PDF
             pdf_file = generate_pdf(matched_tools, user_input)
             st.success(f"PDF generated successfully!")
